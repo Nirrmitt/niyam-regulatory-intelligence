@@ -1,4 +1,4 @@
-# Niyam — Regulatory Intelligence
+# Niyam: Regulatory Intelligence
 
 **Ask regulatory questions in plain language. Get relevant PDF passages with page-level citations.**
 
@@ -177,6 +177,21 @@ Good next milestones are to connect the pgvector schema to ingestion and retriev
 ## Technology
 
 Python · FastAPI · Streamlit · PostgreSQL · pgvector · PyMuPDF · Docker Compose
+## 🤝 Connect & Contribute
+I’m always open to feedback, collaboration, or chat about analytics engineering, automation, or data storytelling.
+
+📧 Email: nirrmit.rtickoo@gmail.com
+
+🌐 Portfolio: [NRT](https://nirrmitt.github.io/NRT-Terminal)
+
+💼 LinkedIn: [Nirrmit R. Tickoo](https://www.linkedin.com/in/n-r-t/)
+
+🐙 GitHub: [ @nirrmitt](https://github.com/Nirrmitt)
+
+🔧 Found a bug or have an idea? Open an issue or submit a PR. I review all contributions!
+
+### 📜 License
+MIT ©[Nirrmitt](https://nirrmitt.github.io/NRT-Terminal) Feel free to use, adapt, and build upon this for your own projects or learning journey.
 
 ## Responsible use
 
