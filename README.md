@@ -328,11 +328,21 @@ requirements.txt        API and project dependencies
 
 ## Responsible use
 
-Niyam is a software prototype and research aid—not legal advice, a compliance determination, or a replacement for the applicable official circular, regulation, or professional counsel. Verify every excerpt against its original, current source and assess its applicability before relying on it. Respect document licenses, confidentiality requirements, and organizational data-handling policies.
+Niyam is a software prototype and research aid-not legal advice, a compliance determination, or a replacement for the applicable official circular, regulation, or professional counsel. Verify every excerpt against its original, current source and assess its applicability before relying on it. Respect document licenses, confidentiality requirements, and organizational data-handling policies.
 
-## Connect
+## 🤝 Connect & Contribute
+I’m always open to feedback, collaboration, or chat about analytics engineering, automation, or data storytelling.
 
-- **Portfolio:** [NRT](https://nirrmitt.github.io/NRT-Terminal)
-- **LinkedIn:** [Nirrmit R. Tickoo](https://www.linkedin.com/in/n-r-t/)
-- **GitHub:** [@Nirrmitt](https://github.com/Nirrmitt)
-- **Email:** [nirrmit.rtickoo@gmail.com](mailto:nirrmit.rtickoo@gmail.com)
+📧 Email: nirrmit.rtickoo@gmail.com
+
+🌐 Portfolio: [NRT](https://nirrmitt.github.io/NRT-Terminal)
+
+💼 LinkedIn: [Nirrmit R. Tickoo](https://www.linkedin.com/in/n-r-t/)
+
+🐙 GitHub: [ @nirrmitt](https://github.com/Nirrmitt)
+
+🔧 Found a bug or have an idea? Open an issue or submit a PR. I review all contributions!
+
+### 📜 License
+MIT ©[Nirrmitt](https://nirrmitt.github.io/NRT-Terminal) Feel free to use, adapt, and build upon this for your own projects or learning journey.
+
