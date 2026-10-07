@@ -1,0 +1,70 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: regulatory_rag_db
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 10s
+      retries: 5
+      timeout: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: regulatory_rag_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://rag:rag@db:5432/rag
+      - OPENROUTER_API_KEY=
+      - OPENROUTER_MODEL=meta-llama/llama-3.1-8b-instruct
+      - EMBED_MODEL=BAAI/bge-small-en-v1.5
+      - RERANK_MODEL=BAAI/bge-reranker-base
+      - DEFAULT_STRATEGY=recursive
+      - DEFAULT_MODE=hybrid_rerank
+      - TOP_K=5
+      - CANDIDATE_K=30
+      - SIMILARITY_THRESHOLD=0.45
+      - API_KEY=
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: regulatory_rag_ui
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+      - API_KEY=
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  hf_cache:

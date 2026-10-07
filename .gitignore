@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+data/raw/*
+!data/sources.json
+.ui/venv/
+.dockerignore
+*.log
