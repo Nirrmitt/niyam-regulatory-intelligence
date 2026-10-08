@@ -3,6 +3,7 @@ __pycache__/
 .env
 data/raw/*
 !data/sources.json
+evaluation/raw/*.pdf
 .ui/venv/
 .dockerignore
 *.log

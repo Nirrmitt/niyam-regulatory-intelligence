@@ -1,7 +1,15 @@
 from openai import AsyncOpenAI
+import re
 
 from app.config import settings
 from app.retrieval import ChunkRecord
+
+
+def unmapped_source_citations(answer: str, source_ids: set[str]) -> list[str]:
+    citations = re.findall(r"\[S[^\]]+\]", answer)
+    return sorted(
+        set(citation for citation in citations if citation[1:-1] not in source_ids)
+    )
 
 
 def build_generation_messages(

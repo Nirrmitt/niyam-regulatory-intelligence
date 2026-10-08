@@ -1,5 +1,8 @@
 import asyncio
 
+import pytest
+from fastapi import HTTPException
+
 from app import main
 from app.retrieval import ChunkRecord
 from app.schemas import AskRequest
@@ -68,3 +71,29 @@ def test_ask_abstains_when_retrieved_evidence_is_below_threshold(monkeypatch):
     assert response.answered is False
     assert response.cited_sources == []
     assert response.retrieved_sources[0].chunk_id == chunk.chunk_id
+
+
+def test_ask_rejects_citations_that_do_not_map_to_retrieved_sources(monkeypatch):
+    chunk = ChunkRecord(
+        chunk_id=1,
+        doc_title="Disclosure Rules",
+        source_file="disclosure.pdf",
+        page_start=4,
+        content="Banks must disclose material risk exposures.",
+        vector_score=0.82,
+    )
+    monkeypatch.setattr(main.index, "search", lambda question, top_k, mode: [chunk])
+
+    async def fake_generate(question, chunks):
+        return "Banks must disclose material risk exposures [S7]."
+
+    monkeypatch.setattr(main, "generate_grounded_answer", fake_generate)
+    payload = AskRequest(
+        question="What must banks disclose?",
+        strategy="recursive",
+        mode="vector",
+        top_k=1,
+    )
+
+    with pytest.raises(HTTPException, match="do not match retrieved sources"):
+        asyncio.run(main.ask(payload))

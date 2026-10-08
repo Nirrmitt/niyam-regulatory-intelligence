@@ -25,6 +25,7 @@ Niyam extracts text from local regulatory PDFs, splits it into page-aware passag
 - [Run with Docker Compose](#run-with-docker-compose)
 - [Run locally without Docker](#run-locally-without-docker)
 - [Add source documents](#add-source-documents)
+- [Retrieval evaluation](#retrieval-evaluation)
 - [Development and tests](#development-and-tests)
 - [Configuration](#configuration)
 - [Repository layout](#repository-layout)
@@ -261,6 +262,28 @@ Open `http://127.0.0.1:8501`. Use `Ctrl+C` in each terminal to stop the local pr
 
 The app reads `*.pdf` files in the directory; it does not download source URLs from `data/sources.json`, perform OCR, or offer file uploads.
 
+## Retrieval evaluation
+
+The small page-level benchmark contains 50 labelled questions over two official RBI PDFs: the KYC Master Direction (updated August 14, 2025) and the Housing Finance Master Circular (February 18, 2022). Each question is annotated with the relevant document and physical PDF page. A hit counts when any of the top-*k* retrieved passages starts on a labelled page in the labelled document; recall is the fraction of questions with a hit.
+
+Download the source documents and run the comparison from the repository root:
+
+```powershell
+.\scripts\download_eval_pdfs.ps1
+py -3.11 -m scripts.evaluate_retrieval
+```
+
+The script compares keyword, vector, hybrid, and hybrid-with-reranking retrieval at Recall@1, Recall@3, and Recall@5. It uses the configured embedding and reranker models, so the first run may download model weights. The benchmark definitions, labels, official source URLs, downloader, and runner are in `evaluation/` and `scripts/`; downloaded PDFs are kept in the git-ignored `evaluation/raw/` directory and are not redistributed here.
+
+| Retrieval mode | Recall@1 | Recall@3 | Recall@5 |
+| --- | ---: | ---: | ---: |
+| Keyword | _Run benchmark_ | _Run benchmark_ | _Run benchmark_ |
+| Vector | _Run benchmark_ | _Run benchmark_ | _Run benchmark_ |
+| Hybrid | _Run benchmark_ | _Run benchmark_ | _Run benchmark_ |
+| Hybrid + reranking | _Run benchmark_ | _Run benchmark_ | _Run benchmark_ |
+
+This is a small retrieval benchmark, not a legal-accuracy or answer-quality evaluation. The API also checks that each generated `[S#]` citation maps to a source included in that answer's retrieved passages; this verifies source membership, not whether a citation supports the associated claim.
+
 ## Development and tests
 
 Install `requirements.txt`, then from the repository root run:
@@ -271,7 +294,7 @@ py -3.11 -m ruff format --check .
 py -3.11 -m pytest tests/ -q
 ```
 
-The focused tests exercise retrieval modes, reranking, generation requests and grounding instructions, answer citations, weak-evidence abstention, top-k behavior, empty-index behavior, and request-schema acceptance/rejection. They do not evaluate legal accuracy, OCR, database-backed retrieval, or model output quality.
+The focused tests exercise retrieval modes, reranking, gold-page recall, citation-to-source mapping, generation requests and grounding instructions, weak-evidence abstention, top-k behavior, empty-index behavior, and request-schema acceptance/rejection. They do not evaluate legal accuracy, OCR, database-backed retrieval, or generated answer quality.
 
 ## Configuration
 
@@ -305,9 +328,15 @@ app/
 data/
   raw/                  Local PDF inputs (git-ignored)
   sources.json          Source manifest placeholder
+evaluation/
+  questions.json        50 question/page labels and official PDF URLs
+  raw/                  Downloaded evaluation PDFs (git-ignored)
 scripts/
+  download_eval_pdfs.ps1  Download the official evaluation PDFs
+  evaluate_retrieval.py   Compare retrieval modes on the labelled questions
   init_db.sql           PostgreSQL/pgvector foundation schema
 tests/
+  test_evaluation.py    Page-level recall metric tests
   test_generation.py    Grounded-generation prompt tests
   test_main.py          Answer, citation, and abstention tests
   test_retrieval.py     Retrieval and request-schema tests
@@ -327,7 +356,7 @@ requirements.txt        API and project dependencies
 - **In-memory index:** passages are re-read and re-embedded at API startup; PostgreSQL is not the active `/ask` store.
 - **External generation dependency:** grounded answer generation requires an OpenRouter API key and provider availability.
 - **Chunking strategy is global:** the request's `strategy` value does not yet select a distinct chunking implementation.
-- **No automated citation validation:** the model is instructed to cite retrieved source labels, but its generated claims and citations still need review.
+- **Citation scope only:** the API rejects citation labels that do not map to retrieved sources, but does not verify that a source supports its claim.
 - **No OCR or download workflow:** scanned PDFs, automatic source acquisition, and UI uploads are unsupported.
 - **Page-level only:** passages retain a starting page; chunk boundaries do not span pages in the current implementation.
 - **Development security only:** the optional API-key middleware permits requests that omit the header; Compose uses development credentials and exposes local ports.
@@ -336,7 +365,7 @@ requirements.txt        API and project dependencies
 ### Potential next steps
 
 1. Persist embeddings and passage metadata in PostgreSQL/pgvector.
-2. Add evaluation datasets for recall, ranking quality, and citation correctness.
+2. Expand evaluation datasets and measure ranking quality, citation support, and generated-answer quality.
 3. Add scanned-PDF OCR, supported file uploads, secure authentication, and deployment-focused configuration.
 
 ## Responsible use
@@ -358,4 +387,3 @@ I’m always open to feedback, collaboration, or chat about analytics engineerin
 
 ### 📜 License
 MIT ©[Nirrmitt](https://nirrmitt.github.io/NRT-Terminal) Feel free to use, adapt, and build upon this for your own projects or learning journey.
-

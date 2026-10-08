@@ -5,7 +5,7 @@ import pytest
 
 from app import generation
 from app.config import settings
-from app.generation import build_generation_messages
+from app.generation import build_generation_messages, unmapped_source_citations
 from app.retrieval import ChunkRecord
 
 
@@ -76,3 +76,15 @@ def test_generation_requires_openrouter_api_key(monkeypatch):
 
     with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         asyncio.run(generation.generate_grounded_answer("Question", []))
+
+
+def test_every_answer_citation_must_map_to_a_retrieved_source():
+    assert (
+        unmapped_source_citations(
+            "Required disclosures are in [S1] and [S2].", {"S1", "S2"}
+        )
+        == []
+    )
+    assert unmapped_source_citations("Unsupported citation [S3].", {"S1", "S2"}) == [
+        "[S3]"
+    ]

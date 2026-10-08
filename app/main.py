@@ -5,7 +5,7 @@ from starlette.concurrency import run_in_threadpool
 import asyncpg
 
 from app.config import settings
-from app.generation import generate_grounded_answer
+from app.generation import generate_grounded_answer, unmapped_source_citations
 from app.retrieval import index
 from app.schemas import AskRequest, AskResponse, RetrievedChunk, SourceCitation
 
@@ -114,6 +114,17 @@ async def ask(payload: AskRequest):
         raise HTTPException(
             status_code=502, detail=f"Answer generation failed: {exc}"
         ) from exc
+
+    source_ids = {f"S{index}" for index in range(1, len(retrieved) + 1)}
+    unmapped_citations = unmapped_source_citations(answer, source_ids)
+    if unmapped_citations:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Answer contains citations that do not match retrieved sources: "
+                + ", ".join(unmapped_citations)
+            ),
+        )
 
     cited_sources = [
         SourceCitation(
