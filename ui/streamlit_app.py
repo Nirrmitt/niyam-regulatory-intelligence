@@ -225,6 +225,8 @@ with st.sidebar:
         health = get_api_health()
         st.success("Connected to Niyam API", icon="🟢")
         st.metric("Indexed passages", health.get("documents_loaded", 0))
+        if not health.get("generation_configured"):
+            st.warning("Set OPENROUTER_API_KEY to enable generated answers.")
     except httpx.HTTPError:
         st.error("API unavailable. Check that the backend is running.", icon="🔌")
     except ValueError:
@@ -344,13 +346,14 @@ if result:
     st.markdown("### Sources")
     if sources:
         for source in sources:
+            source_id = html.escape(str(source.get("source_id", "")))
             title = html.escape(str(source.get("doc_title", "Regulatory document")))
             page = source.get("page_start", "—")
             snippet = html.escape(str(source.get("snippet", "")))
             st.markdown(
                 f"""
                 <div class="source-card">
-                    <div class="source-title">◈ &nbsp;{title}</div>
+                    <div class="source-title">[{source_id}] &nbsp;{title}</div>
                     <div class="source-meta">Page {page}</div>
                     <div class="source-snippet">{snippet}</div>
                 </div>

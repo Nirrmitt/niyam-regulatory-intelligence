@@ -24,8 +24,8 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://rag:rag@db:5432/rag
-      - OPENROUTER_API_KEY=
-      - OPENROUTER_MODEL=meta-llama/llama-3.1-8b-instruct
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-meta-llama/llama-3.1-8b-instruct}
       - EMBED_MODEL=BAAI/bge-small-en-v1.5
       - RERANK_MODEL=BAAI/bge-reranker-base
       - DEFAULT_STRATEGY=recursive

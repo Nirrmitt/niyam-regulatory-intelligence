@@ -26,6 +26,7 @@ class RetrievedChunk(BaseModel):
 
 
 class SourceCitation(BaseModel):
+    source_id: str
     doc_title: str
     page_start: int
     snippet: str

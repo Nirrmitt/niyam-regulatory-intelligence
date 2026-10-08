@@ -9,9 +9,9 @@
   <img src="https://img.shields.io/badge/Containers-Docker-2496ED?style=flat&logo=docker&logoColor=white" alt="Docker" />
 </p>
 
-Niyam explores a practical research workflow: extract text from local regulatory PDFs, split it into approximately bounded, page-aware passages, rank the passages against a question, and return excerpts with source citations through a FastAPI service and an interactive Streamlit interface.
+Niyam extracts text from local regulatory PDFs, splits it into page-aware passages, retrieves evidence for plain-language questions, and generates citation-grounded answers through a FastAPI service and an interactive Streamlit interface.
 
-> **Prototype scope:** the current search is lexical, in-memory term-frequency cosine similarity. Answers are assembled from retrieved text; there is no LLM answer generation or semantic embedding search in the `/ask` path. PostgreSQL/pgvector is included as an optional service/schema foundation, but is not the active retrieval store. The configurable search modes and strategies currently share the same ranking implementation.
+> **Prototype scope:** the API embeds PDF passages in memory, retrieves relevant text, and can generate answers grounded in those passages through OpenRouter. PostgreSQL/pgvector remains an optional service/schema foundation; the active `/ask` index is rebuilt in API memory at startup.
 
 ## Contents
 
@@ -36,11 +36,12 @@ Niyam explores a practical research workflow: extract text from local regulatory
 - **Question-to-passage workflow:** ask a question in natural language and inspect the strongest matching excerpts.
 - **PDF text extraction:** reads selectable text from PDF pages with PyMuPDF.
 - **Page-level provenance:** each retrieved passage and citation includes its source filename-derived title and starting page.
-- **Explainable baseline retrieval:** token-frequency cosine similarity provides a lightweight lexical ranking baseline.
+- **Semantic and hybrid retrieval:** sentence-transformer embeddings support meaning-based search alongside keyword and reranked hybrid modes.
+- **Grounded answers:** OpenRouter generation is constrained to retrieved excerpts and instructed to cite source labels or abstain when evidence is insufficient.
 - **Interactive research desk:** Streamlit includes suggested questions, configurable request fields, citation cards, and passage scores.
 - **Typed HTTP boundary:** Pydantic request/response schemas document and validate the FastAPI contract.
 - **Containerized services:** Compose defines the API, PostgreSQL with pgvector, and UI services with health checks.
-- **Focused automated checks:** unit tests cover ranking, top-k limits, empty-index behavior, and request validation.
+- **Focused automated checks:** unit tests cover retrieval modes, grounded prompts, citations, abstention, top-k limits, and request validation.
 
 ## Technical architecture
 
@@ -51,34 +52,39 @@ flowchart LR
     PDF[Text-based PDFs in data/raw] --> START[API startup index load]
     START --> EXTRACT[PyMuPDF page text extraction]
     EXTRACT --> SPLIT[Sentence-aware page chunking]
-    SPLIT --> MEM[In-memory passage list]
-    Q[User question] --> TERMS[Token frequency vectors]
-    MEM --> COS[Cosine similarity ranking]
-    TERMS --> COS
-    COS --> RESP[Answer excerpts and page citations]
+    SPLIT --> EMBED[Passage embeddings]
+    EMBED --> MEM[In-memory passage and vector index]
+    Q[User question] --> QEMBED[Query embedding]
+    MEM --> RETRIEVE[Semantic / hybrid retrieval]
+    QEMBED --> RETRIEVE
+    RETRIEVE --> GENERATE[OpenRouter grounded generation]
+    GENERATE --> RESP[Answer and labeled page citations]
     RESP --> UI[Streamlit research interface]
     UI --> API[FastAPI POST /ask]
-    API --> COS
+    API --> RETRIEVE
 ```
 
 1. On startup, the API scans `data/raw/` for `*.pdf` files.
 2. PyMuPDF extracts text page by page; pages without selectable text are skipped.
 3. Extracted page text is normalized, split around sentence punctuation, and grouped into bounded passages.
-4. At request time, the question and each passage are tokenized into term-frequency maps.
-5. The API ranks passages by cosine similarity and builds response excerpts and citations from the top matches.
-6. Streamlit renders the answer text, citation snippets, and retrieved passages.
+4. At startup, the configured sentence-transformer embeds each passage; vectors are held beside the text in process memory.
+5. At request time, the API embeds the question and retrieves passages using the selected semantic, keyword, hybrid, or hybrid-rerank mode.
+6. The API sends only the retrieved excerpts to OpenRouter with grounding and citation instructions. The response includes the generated answer, source labels, citations, and retrieval scores.
+7. Streamlit renders the answer, source/page citations, and retrieved passages.
 
 The index exists only in the API process memory. Restarting the API rebuilds it from the PDFs still present in `data/raw/`.
 
 ### Ranking details
 
-The baseline tokenizer lowercases text and extracts words matching `[a-zA-Z][a-zA-Z0-9-]{2,}`. Term frequency is used directly; there is no stemming, stop-word removal, inverse document frequency, query expansion, or neural embedding in the active path. Cosine similarity ranks passages, and the API returns up to the requested `top_k`. Chunk sizing is heuristic: a single long sentence can exceed the configured target, and overlap is approximated by carrying sentence tails forward rather than by a tokenizer.
+Semantic retrieval uses the configured sentence-transformer model with normalized cosine similarity. The keyword path uses cosine similarity over lowercased term-frequency vectors matching `[a-zA-Z][a-zA-Z0-9-]{2,}`. Hybrid combines both scores; hybrid-rerank applies the configured CrossEncoder to the leading candidates. Chunk sizing is heuristic: a single long sentence can exceed the configured target, and overlap is approximated by carrying sentence tails forward rather than by a tokenizer.
 
-The API currently copies the same lexical similarity value into `vector_score`, `keyword_score`, `rerank_score`, and `fused_score` for schema compatibility. These fields do **not** represent independent vector, keyword, reranking, or fusion stages yet. Likewise, `strategy` and `mode` are validated and reported as request metadata but do not change the retrieval algorithm.
+The response exposes separate vector, keyword, reranker, and fused scores. A relevance threshold prevents generation when retrieved evidence is weak. The `strategy` request field remains accepted for API compatibility; passage chunking is currently configured globally rather than selected per request.
+
+`vector_score` is the semantic cosine score, `keyword_score` is lexical cosine similarity, `fused_score` is the weighted hybrid score before reranking, and `rerank_score` is the CrossEncoder score after sigmoid scaling. Hybrid retrieval combines semantic and lexical scores with weights of 0.7 and 0.3. Rerank mode scores up to `CANDIDATE_K` hybrid candidates and returns the top passages.
 
 ### Answer construction
 
-When passages match, the API concatenates excerpts from up to the first three results, limits each contribution and the final summary, and labels the text as likely based on source excerpts. This is excerpt assembly, not model-generated synthesis or legal interpretation. `answered` currently means a passage was returned; it does not certify that the match is relevant or legally sufficient.
+When evidence clears the relevance threshold, the API asks the configured OpenRouter model to answer using only the retrieved excerpts. It instructs the model to cite each factual claim with source labels such as `[S1]` and to say when the excerpts do not support an answer. The server returns those labeled source excerpts with document titles and page numbers. A configured `OPENROUTER_API_KEY` is required for generation; missing configuration or provider failures are surfaced as API errors. Citations and generated text still require verification against the original regulation.
 
 ## User interface
 
@@ -90,7 +96,7 @@ The Streamlit application is an interactive research desk with:
 - A question form with visible input validation and request errors.
 - An answer panel, cited source/page cards, top-match score, and expandable passage details.
 
-The controls currently send the API's validated parameters, but selecting a different mode or strategy does not select a different ranking implementation. The interface is not a document-upload tool: source PDFs are placed in `data/raw/`.
+The search-mode control selects the retrieval implementation. The chunking-strategy control is retained for compatibility but does not yet select a different chunking pipeline. The interface is not a document-upload tool: source PDFs are placed in `data/raw/`.
 
 ## API reference
 
@@ -98,8 +104,8 @@ FastAPI's interactive OpenAPI documentation is available at `/docs` while the se
 
 | Method | Path | Purpose | Current behavior |
 | --- | --- | --- | --- |
-| `GET` | `/health` | Report API/index startup state | Returns `status`, a static `db_connected: false`, `models_loaded`, and the number of indexed passages |
-| `POST` | `/ask` | Search indexed PDFs | Validates a question, ranks passages, and returns excerpt-based answer text with citations |
+| `GET` | `/health` | Report API/index startup state | Returns model/generation configuration status and the number of indexed passages |
+| `POST` | `/ask` | Search indexed PDFs | Retrieves passages, checks evidence strength, and generates an OpenRouter answer with source citations |
 | `GET` | `/db-status` | Probe PostgreSQL | Opens a one-off connection and runs `SELECT 1`; this is separate from `/ask` retrieval |
 | `GET` | `/docs` | OpenAPI docs | FastAPI-generated interactive API reference |
 | `GET` | `/openapi.json` | OpenAPI schema | FastAPI-generated schema |
@@ -119,19 +125,19 @@ Request:
 
 | Field | Type | Validation | Current effect |
 | --- | --- | --- | --- |
-| `question` | string | 5–500 characters | Used to build the lexical query vector |
+| `question` | string | 5–500 characters | Embedded for semantic retrieval and supplied to grounded answer generation |
 | `strategy` | string | `fixed` or `recursive` | Validated and returned in metadata; does not alter chunking |
-| `mode` | string | `vector`, `keyword`, `hybrid`, or `hybrid_rerank` | Validated and returned in metadata; does not alter ranking |
-| `top_k` | integer | 1–10 | Number of passages and citations returned |
+| `mode` | string | `vector`, `keyword`, `hybrid`, or `hybrid_rerank` | Selects semantic, keyword, hybrid, or reranked hybrid retrieval |
+| `top_k` | integer | 1–10 | Maximum retrieved passages supplied for generation and returned in the response |
 
 The response is modeled by `AskResponse`:
 
 | Field | Meaning |
 | --- | --- |
-| `answer` | Excerpt-based response text, or a no-documents message |
-| `answered` | Whether the retriever returned at least one passage |
-| `top_score` | Highest lexical cosine similarity |
-| `cited_sources` | Document title, starting page, and short excerpt for each returned result |
+| `answer` | Grounded model-generated response, or a no-evidence message |
+| `answered` | Whether evidence cleared the configured relevance threshold and generation succeeded |
+| `top_score` | Best score for the selected retrieval mode |
+| `cited_sources` | Source label (`S1`, `S2`, ...), document title, starting page, and short excerpt for each retrieved result; answer citations use these labels |
 | `retrieved_sources` | Returned passages and score fields |
 | `meta` | Validated request options, question length, loaded passage count, and match count |
 
@@ -152,7 +158,7 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-Invalid request fields are rejected by FastAPI/Pydantic with HTTP `422`. With no indexed passages, the API returns `answered: false` and empty citation/result arrays.
+Invalid request fields are rejected by FastAPI/Pydantic with HTTP `422`. With no indexed passages, the API returns `answered: false` and empty citation/result arrays. Weak matches return `answered: false` without calling the language model. Missing OpenRouter configuration returns HTTP `503`; provider failures return HTTP `502`.
 
 ## Data and persistence
 
@@ -168,7 +174,7 @@ Only PDFs with selectable text are supported in the current path. Image-only/sca
 
 ### PostgreSQL and pgvector
 
-Compose also starts `pgvector/pgvector:pg16` and initializes the schema in `scripts/init_db.sql`, including `documents`, `chunks`, `query_log`, a 384-dimensional vector column, and vector/full-text indexes. This schema is groundwork for a future persistent retriever: the current startup loader and `/ask` route do not write to or query these tables. The health response consequently reports `db_connected: false`; use `/db-status` to test the separate database service.
+Compose also starts `pgvector/pgvector:pg16` and initializes the schema in `scripts/init_db.sql`, including `documents`, `chunks`, `query_log`, a 384-dimensional vector column, and vector/full-text indexes. The active retriever currently keeps embeddings and passages in API memory; it does not persist to these tables. The health response reports `db_connected: false`; use `/db-status` to test the separate database service.
 
 ## Requirements
 
@@ -176,13 +182,15 @@ Compose also starts `pgvector/pgvector:pg16` and initializes the schema in `scri
 - Python 3.11 and pip, for local API/UI processes
 - Text-based PDF files for meaningful search results
 
-The project declares its API/application dependencies in `requirements.txt` and the UI dependencies in `ui/requirements.txt`. The API image also downloads an embedding-model package/cache during its build, but that model is not used by the current lexical retrieval path; first build can therefore take longer and require a network connection.
+The project declares its API/application dependencies in `requirements.txt` and the UI dependencies in `ui/requirements.txt`. The API downloads the embedding model during image build; model weights and the reranker may require a network connection on first use. Answer generation requires an OpenRouter API key.
 
 ## Run with Docker Compose
 
 From the repository root, with Docker Desktop running:
 
 ```powershell
+Copy-Item .env.example .env
+# Edit .env and set OPENROUTER_API_KEY for generated answers
 docker compose up --build
 ```
 
@@ -211,7 +219,7 @@ docker compose down
 
 ## Run locally without Docker
 
-The in-memory PDF retrieval route does not require PostgreSQL. `/db-status` does.
+PDF retrieval and answer generation require model downloads and do not require PostgreSQL. `/db-status` does.
 
 Create a virtual environment and install the application and UI dependencies:
 
@@ -220,6 +228,8 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m pip install -r ui/requirements.txt
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+# Edit .env and set OPENROUTER_API_KEY
 ```
 
 Start the API in one terminal from the repository root:
@@ -261,7 +271,7 @@ py -3.11 -m ruff format --check .
 py -3.11 -m pytest tests/ -q
 ```
 
-The focused tests exercise retrieval ordering, top-k behavior, empty-index behavior, and request-schema acceptance/rejection. They do not evaluate legal accuracy, OCR, database-backed retrieval, or LLM generation.
+The focused tests exercise retrieval modes, reranking, generation requests and grounding instructions, answer citations, weak-evidence abstention, top-k behavior, empty-index behavior, and request-schema acceptance/rejection. They do not evaluate legal accuracy, OCR, database-backed retrieval, or model output quality.
 
 ## Configuration
 
@@ -273,11 +283,14 @@ Defaults live in `app/config.py`; Compose also sets service environment values i
 | `API_KEY` | Optional header comparison setting | Middleware rejects a supplied wrong key, but currently allows a missing key; not production authentication |
 | `CHUNK_TOKENS` | Approximate page chunk target | Converts to an approximate character target using four characters per configured token |
 | `CHUNK_OVERLAP` | Approximate overlap setting | Used as a rough overlap threshold; not a tokenizer-based token overlap |
-| `OPENROUTER_API_KEY` | Future model integration setting | Not consumed by current routes |
-| `EMBED_MODEL`, `RERANK_MODEL` | Model identifiers | Not used in current lexical search |
-| `TOP_K`, `DEFAULT_MODE`, `DEFAULT_STRATEGY` | Retrieval defaults | Request UI/API values are validated independently; algorithm currently stays the same |
+| `OPENROUTER_API_KEY` | OpenRouter credential | Required for answer generation; absent key produces HTTP `503` when evidence is sufficient |
+| `OPENROUTER_MODEL` | OpenRouter chat model | Model used to generate grounded answers |
+| `EMBED_MODEL`, `RERANK_MODEL` | Model identifiers | Used for semantic passage retrieval and hybrid reranking |
+| `TOP_K`, `DEFAULT_MODE`, `DEFAULT_STRATEGY` | Retrieval defaults | Controls default retrieval settings; `strategy` is currently compatibility-only |
+| `CANDIDATE_K` | Hybrid reranker candidate count | Limits the passages reranked before selecting `top_k` |
+| `SIMILARITY_THRESHOLD`, `RERANK_THRESHOLD` | Evidence thresholds | Weak matches abstain instead of being sent for answer generation |
 
-Compose currently supplies some settings as explicit service environment variables. Review `docker-compose.yml` before assuming local `.env` overrides those values.
+Compose forwards `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` from `.env`; other Compose settings are set in `docker-compose.yml`.
 
 ## Repository layout
 
@@ -285,8 +298,9 @@ Compose currently supplies some settings as explicit service environment variabl
 app/
   config.py             Settings and development defaults
   db.py                 Async PostgreSQL pool context manager
+  generation.py         OpenRouter grounded-answer generation
   main.py               FastAPI endpoints and request orchestration
-  retrieval.py          PDF extraction, chunk splitting, lexical ranking
+  retrieval.py          PDF extraction, chunk splitting, embedding and retrieval
   schemas.py            Pydantic API request and response models
 data/
   raw/                  Local PDF inputs (git-ignored)
@@ -294,7 +308,9 @@ data/
 scripts/
   init_db.sql           PostgreSQL/pgvector foundation schema
 tests/
-  test_retrieval.py     Focused search/schema tests
+  test_generation.py    Grounded-generation prompt tests
+  test_main.py          Answer, citation, and abstention tests
+  test_retrieval.py     Retrieval and request-schema tests
 ui/
   Dockerfile            Streamlit container definition
   requirements.txt      UI dependencies
@@ -308,11 +324,10 @@ requirements.txt        API and project dependencies
 
 ### Current limitations
 
-- **Lexical matching only:** term-frequency cosine similarity misses paraphrases and concepts without shared terms.
-- **No actual RAG/LLM generation:** response text is assembled from source passages, not generated or verified by a language model.
-- **Search options are placeholders:** the `mode` and `strategy` values do not choose distinct implementations.
-- **No score cutoff:** any non-empty retrieval result is marked answered, even if the best match is weak.
-- **Memory-only index:** passages are re-read and re-indexed at API startup; PostgreSQL is not the active `/ask` store.
+- **In-memory index:** passages are re-read and re-embedded at API startup; PostgreSQL is not the active `/ask` store.
+- **External generation dependency:** grounded answer generation requires an OpenRouter API key and provider availability.
+- **Chunking strategy is global:** the request's `strategy` value does not yet select a distinct chunking implementation.
+- **No automated citation validation:** the model is instructed to cite retrieved source labels, but its generated claims and citations still need review.
 - **No OCR or download workflow:** scanned PDFs, automatic source acquisition, and UI uploads are unsupported.
 - **Page-level only:** passages retain a starting page; chunk boundaries do not span pages in the current implementation.
 - **Development security only:** the optional API-key middleware permits requests that omit the header; Compose uses development credentials and exposes local ports.
@@ -320,11 +335,9 @@ requirements.txt        API and project dependencies
 
 ### Potential next steps
 
-1. Implement durable PDF/document ingestion and persist passage metadata in PostgreSQL.
-2. Add real embedding generation and pgvector similarity search, with separate keyword/hybrid modes.
-3. Implement a grounded generation flow that cites source passages and clearly abstains on weak evidence.
-4. Add configurable relevance thresholds and evaluation datasets for recall, ranking quality, and citation correctness.
-5. Add scanned-PDF OCR, supported file uploads, secure authentication, and deployment-focused configuration.
+1. Persist embeddings and passage metadata in PostgreSQL/pgvector.
+2. Add evaluation datasets for recall, ranking quality, and citation correctness.
+3. Add scanned-PDF OCR, supported file uploads, secure authentication, and deployment-focused configuration.
 
 ## Responsible use
 

@@ -6,6 +6,7 @@ asyncpg==0.29.0
 psycopg[binary]==3.1.14
 pymupdf==1.23.8
 sentence-transformers==2.2.2
+huggingface-hub==0.25.2
 openai==1.25.0
 httpx==0.26.0
 tiktoken==0.6.0
